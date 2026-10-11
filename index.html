@@ -183,7 +183,7 @@ var pass=lget(PKEY)||'';
 var canEdit=false, adminMode=true, loaded=false, dbError='', loginErr='', saving=false, dirty=false;
 var tab=store('get','copa-tab')||'vivo';
 var draftFormat=S.format||'llaves';
-var confirmKey=null, saveTimer=null, formErr='';
+var confirmKey=null, saveTimer=null, formErr='', editId=null, editErr='';
 
 function store(op,k,v){try{if(op==='get')return sessionStorage.getItem(k);sessionStorage.setItem(k,v);}catch(e){return null}}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
@@ -409,12 +409,49 @@ function bm(m){
   function line(id,g){var t=id?T(id):null,nm=id===undefined?'Por definir':id===null?'—':(t?t.name:'—');var win=r&&r.w&&r.w===id;return '<div class="bt'+(win?' win':'')+'"><span'+(t?'':' class="tbd"')+'>'+esc(nm)+'</span><b>'+(m.status==='pendiente'||!playable(m)?'':g)+'</b></div>'}
   return '<div class="bm'+(m.status==='vivo'?' live':'')+'">'+line(s[0],m.ga)+line(s[1],m.gb)+'</div>';
 }
-function teamsGrid(withDelete){
+function teamsGrid(withDelete,withEdit){
   if(!S.teams.length)return '<div class="empty"><b>Sin equipos todavía</b><span>Aquí aparecen los equipos con sus dos jugadores y su club del FIFA.</span></div>';
-  return '<div class="teams">'+S.teams.map(function(t){return '<div class="tcard"><div class="team">'+crest(t)+'<div><div class="tname">'+esc(t.name)+'</div><div class="tmeta">'+meta(t)+'</div></div></div>'
-    +(withDelete?'<button class="btn danger" data-act="del-team" data-id="'+t.id+'" aria-label="Quitar '+esc(t.name)+'">'+(confirmKey==='del-'+t.id?'¿Seguro?':'Quitar')+'</button>':'')+'</div>'}).join('')+'</div>';
+  return '<div class="teams">'+S.teams.map(function(t){
+    if(withEdit&&editId===t.id)return '<form class="panel" id="edit-form" data-id="'+t.id+'" autocomplete="off" style="grid-column:1/-1"><h3>Editar equipo</h3>'
+      +'<label>Nombre del equipo<input id="e-name" maxlength="40" value="'+esc(t.name)+'" required></label>'
+      +'<div class="grid2"><label>Jugador 1<input id="e-p1" maxlength="30" value="'+esc(t.p1)+'" required></label><label>Jugador 2<input id="e-p2" maxlength="30" value="'+esc(t.p2)+'" required></label></div>'
+      +'<label>Equipo del FIFA<input id="e-club" list="clubs-e" maxlength="40" value="'+esc(t.club)+'" required></label>'
+      +'<datalist id="clubs-e">'+CLUBS.map(function(c){return '<option value="'+esc(c)+'">'}).join('')+'</datalist>'
+      +(editErr?'<p class="err">'+esc(editErr)+'</p>':'')
+      +'<div class="row-actions"><button class="btn primary" type="submit">Guardar cambios</button><button class="btn ghost" type="button" data-act="edit-cancel">Cancelar</button></div></form>';
+    return '<div class="tcard"><div class="team">'+crest(t)+'<div><div class="tname">'+esc(t.name)+'</div><div class="tmeta">'+meta(t)+'</div></div></div>'
+    +'<div class="row-actions" style="flex:none">'
+    +(withEdit?'<button class="btn ghost" data-act="edit-team" data-id="'+t.id+'" aria-label="Editar '+esc(t.name)+'">Editar</button>':'')
+    +(withDelete?'<button class="btn danger" data-act="del-team" data-id="'+t.id+'" aria-label="Quitar '+esc(t.name)+'">'+(confirmKey==='del-'+t.id?'¿Seguro?':'Quitar')+'</button>':'')+'</div></div>'}).join('')+'</div>';
 }
 function viewEquipos(){return '<section class="sec"><h2>'+S.teams.length+' '+(S.teams.length===1?'equipo':'equipos')+'</h2>'+teamsGrid(false)+'</section>'}
+function teamFields(){
+  return '<label>Nombre del equipo<input id="f-name" maxlength="40" placeholder="Ej. Los Galácticos de Pabs" required></label>'
+      +'<div class="grid2"><label>Jugador 1<input id="f-p1" maxlength="30" placeholder="Nombre" required></label><label>Jugador 2<input id="f-p2" maxlength="30" placeholder="Nombre" required></label></div>'
+      +'<label>Equipo del FIFA con el que juegan<input id="f-club" list="clubs" maxlength="40" placeholder="Busca o escribe un club o selección" required></label>'
+      +'<datalist id="clubs">'+CLUBS.map(function(c){return '<option value="'+esc(c)+'">'}).join('')+'</datalist>';
+}
+/* Late entries: knockout fills a first-round bye whose next match hasn't started; league adds games vs everyone */
+function freeByes(){
+  if(S.format==='liga')return [];
+  return S.matches.filter(function(m){
+    if(m.stage!=='ko'||m.round!==1)return false;
+    if(!((m.a===null)!==(m.b===null)))return false;
+    return dependents(m).every(function(d){return d.status==='pendiente'});
+  }).sort(function(x,y){return x.idx-y.idx});
+}
+function addLateTeam(t){
+  if(S.format==='liga'){
+    var maxR=0;S.matches.forEach(function(m){if(m.round>maxR)maxR=m.round});
+    var rivals=S.teams.filter(function(x){return x.id!==t.id});
+    rivals.forEach(function(r,i){S.matches.push({id:uid(),stage:'liga',round:maxR+1+i,idx:0,a:r.id,b:t.id,ga:0,gb:0,pen:null,status:'pendiente'})});
+    return true;
+  }
+  var fb=freeByes();if(!fb.length)return false;
+  var m=fb[0];if(m.a===null)m.a=t.id;else m.b=t.id;
+  m.status='pendiente';m.ga=0;m.gb=0;m.pen=null;
+  return true;
+}
 function localCopy(){try{var p=JSON.parse(lget('copa-pabs-state')||'null');return p&&p.teams&&p.matches&&p.teams.length?p:null}catch(e){return null}}
 function viewAdmin(){
   var h='',lc=localCopy();
@@ -426,21 +463,31 @@ function viewAdmin(){
   }
   if(S.phase==='registro'){
     h+='<form class="panel" id="team-form" autocomplete="off"><h3>Inscribir equipo</h3>'
-      +'<label>Nombre del equipo<input id="f-name" maxlength="40" placeholder="Ej. Los Galácticos de Pabs" required></label>'
-      +'<div class="grid2"><label>Jugador 1<input id="f-p1" maxlength="30" placeholder="Nombre" required></label><label>Jugador 2<input id="f-p2" maxlength="30" placeholder="Nombre" required></label></div>'
-      +'<label>Equipo del FIFA con el que juegan<input id="f-club" list="clubs" maxlength="40" placeholder="Busca o escribe un club o selección" required></label>'
-      +'<datalist id="clubs">'+CLUBS.map(function(c){return '<option value="'+esc(c)+'">'}).join('')+'</datalist>'
+      +teamFields()
       +(formErr?'<p class="err">'+esc(formErr)+'</p>':'')
       +'<div class="row-actions"><button class="btn primary" type="submit">Agregar equipo</button></div></form>';
-    h+='<section class="sec"><h2>Equipos inscritos ('+S.teams.length+')</h2>'+teamsGrid(true)+'</section>';
+    h+='<section class="sec"><h2>Equipos inscritos ('+S.teams.length+')</h2>'+teamsGrid(true,true)+'</section>';
     h+='<section class="panel"><h3>Formato del torneo</h3><div class="seg">'
       +'<button type="button" data-act="fmt" data-f="llaves" aria-pressed="'+(draftFormat==='llaves')+'"><b>Eliminación directa</b><span>Llaves sorteadas, penales si hay empate y partido por el 3er lugar.</span></button>'
       +'<button type="button" data-act="fmt" data-f="liga" aria-pressed="'+(draftFormat==='liga')+'"><b>Liga</b><span>Todos contra todos. Victoria 3 pts, empate 1. El podio sale de la tabla.</span></button></div>'
       +(S.teams.length<3?'<p class="note">Se necesitan al menos 3 equipos para tener 1º, 2º y 3º lugar.</p>':'<p class="note">'+matchCountNote()+'</p>')
       +'<div class="row-actions"><button class="btn primary" data-act="start-t"'+(S.teams.length<3?' disabled':'')+'>'+(confirmKey==='start-t'?'Confirmar: sortear y arrancar':'Sortear y arrancar torneo')+'</button></div></section>';
   }else{
+    var fb=freeByes(),canAdd=S.format==='liga'||fb.length>0;
+    h+='<form class="panel" id="team-form" autocomplete="off"><h3>Agregar equipo al torneo</h3>';
+    if(canAdd){
+      h+='<p class="note">'+(S.format==='liga'
+        ?'El equipo nuevo juega contra todos los demás. Sus partidos se agregan al final del calendario y los resultados de hoy no cambian.'
+        :'Quedan '+fb.length+' '+(fb.length===1?'lugar':'lugares')+' de pase directo. El equipo nuevo juega la primera ronda contra '+esc((T(fb[0].a||fb[0].b)||{}).name||'el equipo con pase directo')+', que ya no pasa directo. Lo demás no cambia.')+'</p>'
+        +teamFields()+(formErr?'<p class="err">'+esc(formErr)+'</p>':'')
+        +'<div class="row-actions"><button class="btn primary" type="submit">Agregar al torneo</button></div>';
+    }else{
+      h+='<p class="note">Ya no hay lugares libres en las llaves: todos los pases directos ya se usaron o esos equipos ya jugaron su siguiente partido. Para meter más equipos habría que volver a sortear.</p>';
+    }
+    h+='</form>';
+    h+='<section class="sec"><h2>Equipos ('+S.teams.length+')</h2><p class="note">Puedes corregir nombres, jugadores o club. Los resultados no cambian.</p>'+teamsGrid(false,true)+'</section>';
     h+='<section class="panel"><h3>Cómo capturar resultados</h3><p class="note">En las pestañas En vivo o Partidos, toca “Empezar partido”, suma los goles con + y − mientras juegan y toca “Terminar partido”. Cada cambio se guarda solo y llega a todos los celulares en unos segundos.</p></section>';
-    h+='<section class="panel"><h3>Reiniciar</h3><p class="note">Volver a inscripciones borra todos los resultados, pero conserva los equipos.</p><div class="row-actions">'
+    h+='<section class="panel"><h3>Reiniciar</h3><p class="note">Volver a inscripciones borra todos los resultados y el sorteo; solo conserva los equipos. Para sumar equipos sin perder nada, usa “Agregar equipo al torneo”.</p><div class="row-actions">'
       +'<button class="btn danger" data-act="reset-keep">'+(confirmKey==='reset-keep'?'¿Seguro? Toca de nuevo':'Volver a inscripciones')+'</button>'
       +'<button class="btn danger" data-act="reset-all">'+(confirmKey==='reset-all'?'¿Seguro? Se borra todo':'Borrar todo')+'</button></div></section>';
   }
@@ -457,7 +504,7 @@ function matchCountNote(){var n=S.teams.length;if(draftFormat==='liga')return n+
 function render(){
   var app=document.getElementById('app');
   var focusId=document.activeElement&&document.activeElement.id;
-  var vals={};['f-name','f-p1','f-p2','f-club','f-pass'].forEach(function(k){var e=document.getElementById(k);if(e)vals[k]=e.value});
+  var vals={};['f-name','f-p1','f-p2','f-club','f-pass','e-name','e-p1','e-p2','e-club'].forEach(function(k){var e=document.getElementById(k);if(e)vals[k]=e.value});
   if(tab==='admin'&&!isAdmin())tab='vivo';
   if(tab==='login'&&canEdit)tab='admin';
   var p=podium(),liveN=S.matches.filter(function(m){return m.status==='vivo'}).length;
@@ -488,6 +535,8 @@ document.addEventListener('click',function(e){
   if(act==='admin-mode'){adminMode=!adminMode;render();return}
   if(act==='logout'){canEdit=false;pass='';lset(PKEY,null);tab='vivo';render();return}
   if(!isAdmin())return;
+  if(act==='edit-team'){editId=id;editErr='';render();var en=document.getElementById('e-name');if(en)en.focus();return}
+  if(act==='edit-cancel'){editId=null;editErr='';render();return}
   if(act==='fmt'){draftFormat=b.getAttribute('data-f');render();return}
   if(act==='del-team'){if(confirmKey!=='del-'+id){confirmKey='del-'+id;render();return}confirmKey=null;S.teams=S.teams.filter(function(t){return t.id!==id});save();return}
   if(act==='start-t'){if(confirmKey!=='start-t'){confirmKey='start-t';render();return}confirmKey=null;
@@ -507,6 +556,14 @@ document.addEventListener('click',function(e){
   else if(act==='reopen'){if(!canReopen(m))return;m.status='vivo';save()}
 });
 document.addEventListener('submit',function(e){
+  if(e.target.id==='edit-form'){e.preventDefault();if(!isAdmin())return;
+    var t=T(e.target.getAttribute('data-id'));if(!t){editId=null;render();return}
+    function ev(k){return document.getElementById(k).value.trim()}
+    var n=ev('e-name'),a=ev('e-p1'),b=ev('e-p2'),c=ev('e-club');
+    if(!n||!a||!b||!c){editErr='Llena los cuatro campos.';render();return}
+    if(S.teams.some(function(x){return x.id!==t.id&&x.name.toLowerCase()===n.toLowerCase()})){editErr='Ya hay otro equipo llamado “'+n+'”.';render();return}
+    if(S.teams.some(function(x){return x.id!==t.id&&x.club.toLowerCase()===c.toLowerCase()})){editErr=c+' ya lo tiene otro equipo.';render();return}
+    t.name=n;t.p1=a;t.p2=b;t.club=c;editId=null;editErr='';save();toast('Cambios guardados.');return}
   if(e.target.id==='login-form'){e.preventDefault();
     var pw=document.getElementById('f-pass').value;loginErr='';
     api('POST',{password:pw,check:true}).then(function(r){
@@ -520,7 +577,12 @@ document.addEventListener('submit',function(e){
   if(!name||!p1||!p2||!club){formErr='Llena los cuatro campos.';render();return}
   if(S.teams.some(function(t){return t.name.toLowerCase()===name.toLowerCase()})){formErr='Ya hay un equipo llamado “'+name+'”. Usa otro nombre.';render();return}
   if(S.teams.some(function(t){return t.club.toLowerCase()===club.toLowerCase()})){formErr=club+' ya lo eligió otro equipo. Escojan otro club.';render();return}
-  formErr='';S.teams.push({id:uid(),name:name,p1:p1,p2:p2,club:club});
+  var nt={id:uid(),name:name,p1:p1,p2:p2,club:club};
+  if(S.phase==='torneo'){
+    if(S.format!=='liga'&&!freeByes().length){formErr='Ya no hay lugares libres en las llaves.';render();return}
+    S.teams.push(nt);addLateTeam(nt);
+  }else S.teams.push(nt);
+  formErr='';toast(S.phase==='torneo'?name+' ya está en el torneo.':name+' inscrito.');
   ['f-name','f-p1','f-p2','f-club'].forEach(function(k){document.getElementById(k).value=''});
   save();document.getElementById('f-name')&&document.getElementById('f-name').focus();
 });
