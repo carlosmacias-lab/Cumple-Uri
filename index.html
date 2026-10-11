@@ -1,4 +1,8 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Copa Pabs</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap">
 <style id="app-style">
@@ -12,7 +16,9 @@
   color-scheme:dark;
 }
 *{box-sizing:border-box}
-body{background:var(--night);color:var(--chalk);font-family:var(--f-body);font-size:15px;line-height:1.45;
+[hidden]{display:none!important}
+.linkish{background:none;cursor:pointer}
+body{margin:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);background:var(--night);color:var(--chalk);font-family:var(--f-body);font-size:15px;line-height:1.45;
   background-image:repeating-linear-gradient(90deg,transparent 0 56px,rgba(255,255,255,.018) 56px 112px);min-height:100vh}
 .wrap{max-width:760px;margin:0 auto;padding-inline:16px;padding-block:0 64px}
 button,input,select{font:inherit;color:inherit}
@@ -160,30 +166,30 @@ input::placeholder{color:#5f7a6c}
 }
 @media (prefers-reduced-motion:reduce){.pill.live .dot{animation:none}}
 </style>
+</head>
+<body>
 <script type="application/json" id="copa-state">{"v":1,"phase":"registro","format":"llaves","teams":[],"matches":[],"updated":0}</script>
 <div class="wrap" id="app"></div>
 <script id="app-script">
 (function(){
 "use strict";
-var RESET=':root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}img{max-width:100%}[hidden]{display:none!important}';
-var FONTS='https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap';
 var CLUBS=["Real Madrid","FC Barcelona","Manchester City","Liverpool","Arsenal","Chelsea","Manchester United","Tottenham Hotspur","Newcastle United","Aston Villa","Bayern München","Borussia Dortmund","Bayer Leverkusen","Paris Saint-Germain","Inter","AC Milan","Juventus","Napoli","Atlético de Madrid","Benfica","FC Porto","Sporting CP","Ajax","PSV","Club América","Chivas","Cruz Azul","Pumas UNAM","Tigres UANL","Monterrey","Toluca","Boca Juniors","River Plate","Inter Miami","Al Nassr","Al Hilal","México","Argentina","Brasil","Francia","España","Inglaterra","Alemania","Portugal","Países Bajos","Italia","Bélgica","Croacia","Uruguay","Colombia","Estados Unidos","Japón","Marruecos"];
 
 var S=JSON.parse(document.getElementById('copa-state').textContent);
-/* Local mode: the file was downloaded and opened outside Claude. Saves stay in this browser. */
-var LOCAL=location.protocol==='file:'||!(window.claude&&window.claude.use);
-var LKEY='copa-pabs-state';
-if(LOCAL){try{var ls=localStorage.getItem(LKEY);if(ls){var p=JSON.parse(ls);if(p&&p.teams&&p.matches)S=p}}catch(e){}}
-var canEdit=false, adminMode=true, art=null, readOnly=false;
+var API='/api/state', PKEY='copa-admin-pass';
+function lget(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function lset(k,v){try{if(v==null)localStorage.removeItem(k);else localStorage.setItem(k,v)}catch(e){}}
+var pass=lget(PKEY)||'';
+var canEdit=false, adminMode=true, loaded=false, dbError='', loginErr='', saving=false, dirty=false;
 var tab=store('get','copa-tab')||'vivo';
 var draftFormat=S.format||'llaves';
-var confirmKey=null, saveTimer=null, publishing=false, formErr='';
+var confirmKey=null, saveTimer=null, formErr='';
 
 function store(op,k,v){try{if(op==='get')return sessionStorage.getItem(k);sessionStorage.setItem(k,v);}catch(e){return null}}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function uid(){return Math.random().toString(36).slice(2,9)}
 function T(id){for(var i=0;i<S.teams.length;i++)if(S.teams[i].id===id)return S.teams[i];return null}
-function isAdmin(){return canEdit&&adminMode&&!readOnly}
+function isAdmin(){return canEdit&&adminMode}
 function hue(s){var h=0;s=String(s||'');for(var i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))%360;return h}
 function abbr(club){var w=String(club||'?').replace(/^(FC|AC|CF|Club)\s+/i,'').split(/\s+/);return (w.length>1?w.map(function(x){return x[0]}).join('').slice(0,3):w[0].slice(0,3)).toUpperCase()}
 function crest(t){if(!t)return '<div class="crest" style="--h:150">?</div>';return '<div class="crest" style="--h:'+hue(t.club)+'" title="'+esc(t.club)+'">'+esc(abbr(t.club))+'</div>'}
@@ -268,36 +274,37 @@ function dependents(m){
 }
 function canReopen(m){return dependents(m).every(function(d){return d.status==='pendiente'})}
 
-/* ---------- Saving (republishes the page with the new state) ---------- */
-function buildDoc(){
-  var json=JSON.stringify(S).replace(/</g,'\\u003c');
-  var css=document.getElementById('app-style').textContent;
-  var js=document.getElementById('app-script').textContent;
-  return '<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>'+RESET+'</style></head><body>'
-    +'<title>Copa Pabs</title>\n<link rel="stylesheet" href="'+FONTS+'">\n'
-    +'<style id="app-style">'+css+'</style>\n'
-    +'<script type="application/json" id="copa-state">'+json+'<\/script>\n'
-    +'<div class="wrap" id="app"></div>\n'
-    +'<script id="app-script">'+js+'<\/script>\n</body></html>';
+/* ---------- Server sync (Vercel API + Upstash Redis) ---------- */
+function api(method,body){
+  return fetch(API,{method:method,cache:'no-store',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined})
+    .then(function(r){return r.json().catch(function(){return{}}).then(function(j){return{ok:r.ok,status:r.status,j:j}})});
 }
 function save(delay){
-  S.updated=Date.now();
-  if(LOCAL){try{localStorage.setItem(LKEY,JSON.stringify(S))}catch(e){toast('Este navegador no deja guardar; los cambios se pierden al cerrar.')}render();return}
-  render();
-  clearTimeout(saveTimer);saveTimer=setTimeout(doPublish,delay==null?1200:delay);
+  S.updated=Date.now();dirty=true;render();
+  clearTimeout(saveTimer);saveTimer=setTimeout(push,delay==null?500:delay);
 }
-function doPublish(retried){
-  if(!art){toast('No se pudo guardar desde esta vista.');return}
-  publishing=true;render();store('set','copa-tab',tab);
-  art.publish(buildDoc()).then(function(){ /* the viewer reloads every open view, this one included */ })
-  .catch(function(e){
-    publishing=false;var c=e&&e.code;
-    if(c==='conflict'){toast('Otra persona guardó al mismo tiempo. Recargando…');return}
-    if(c==='not_writer'||c==='not_granted'||c==='consent_required'||c==='capability_disabled'||c==='not_declared'){readOnly=true;render();toast('Solo quien administra la página puede cambiar resultados.');return}
-    if(c==='rate_limited'){toast('Muchos cambios seguidos. Reintentando en unos segundos…');saveTimer=setTimeout(doPublish,6000);render();return}
-    if(!retried){setTimeout(function(){doPublish(true)},800+Math.random()*800);return}
-    render();toast('No se guardó el cambio. Intenta de nuevo.');
-  });
+function push(){
+  saveTimer=null;
+  if(saving){saveTimer=setTimeout(push,400);return}
+  saving=true;dirty=false;
+  api('POST',{password:pass,state:S}).then(function(res){
+    saving=false;
+    if(res.status===401){canEdit=false;pass='';lset(PKEY,null);tab='login';loginErr='Tu sesión de admin ya no es válida. Vuelve a entrar.';render();return}
+    if(!res.ok){dirty=true;toast((res.j.error||'No se guardó el cambio.')+' Reintentando…');saveTimer=setTimeout(push,3000);return}
+    render();
+  }).catch(function(){saving=false;dirty=true;toast('Sin conexión. Reintentando…');saveTimer=setTimeout(push,3000)});
+}
+function busy(){return dirty||saving||saveTimer}
+function pull(){
+  if(busy())return;
+  api('GET').then(function(res){
+    if(!res.ok){dbError=res.j.error||'No se pudo cargar el torneo.';loaded=true;render();return}
+    var first=!loaded||dbError;dbError='';loaded=true;
+    if(busy())return;
+    var st=res.j.state;
+    if(st&&st.teams&&st.matches&&st.updated!==S.updated){S=st;if(S.phase==='registro'&&S.format)draftFormat=S.format;render();return}
+    if(first)render();
+  }).catch(function(){if(!loaded){dbError='Sin conexión. Reintentando…';loaded=true;render()}});
 }
 var toastT;
 function toast(msg){var el=document.getElementById('toast');if(!el){el=document.createElement('div');el.id='toast';el.className='toast';el.setAttribute('role','status');document.body.appendChild(el)}el.textContent=msg;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(function(){el.hidden=true},3500)}
@@ -408,8 +415,15 @@ function teamsGrid(withDelete){
     +(withDelete?'<button class="btn danger" data-act="del-team" data-id="'+t.id+'" aria-label="Quitar '+esc(t.name)+'">'+(confirmKey==='del-'+t.id?'¿Seguro?':'Quitar')+'</button>':'')+'</div>'}).join('')+'</div>';
 }
 function viewEquipos(){return '<section class="sec"><h2>'+S.teams.length+' '+(S.teams.length===1?'equipo':'equipos')+'</h2>'+teamsGrid(false)+'</section>'}
+function localCopy(){try{var p=JSON.parse(lget('copa-pabs-state')||'null');return p&&p.teams&&p.matches&&p.teams.length?p:null}catch(e){return null}}
 function viewAdmin(){
-  var h='';
+  var h='',lc=localCopy();
+  if(lc){
+    var played=lc.matches.filter(function(m){return m.status!=='pendiente'}).length;
+    h+='<section class="panel"><h3>Torneo guardado en este dispositivo</h3><p class="note">Encontramos el torneo que armaste antes en este navegador: '+lc.teams.length+' equipos'+(lc.phase==='torneo'?', '+lc.matches.length+' partidos ('+played+' jugados o en juego)':', aún en inscripciones')+'. Súbelo para que todos lo vean en su celular. Esto reemplaza lo que hoy ven los demás.</p>'
+      +'<div class="row-actions"><button class="btn primary" data-act="upload-local">'+(confirmKey==='upload-local'?'Confirmar: publicar para todos':'Publicar este torneo para todos')+'</button>'
+      +'<button class="btn ghost" data-act="forget-local">'+(confirmKey==='forget-local'?'¿Seguro? Toca de nuevo':'Descartar copia')+'</button></div></section>';
+  }
   if(S.phase==='registro'){
     h+='<form class="panel" id="team-form" autocomplete="off"><h3>Inscribir equipo</h3>'
       +'<label>Nombre del equipo<input id="f-name" maxlength="40" placeholder="Ej. Los Galácticos de Pabs" required></label>'
@@ -432,31 +446,36 @@ function viewAdmin(){
   }
   return h;
 }
+function viewLogin(){
+  return '<form class="panel" id="login-form"><h3>Entrar como admin</h3><p class="note">Solo quien organiza el torneo puede inscribir equipos y capturar resultados. Los demás pueden ver todo en vivo sin entrar.</p>'
+    +'<label>Contraseña<input id="f-pass" type="password" autocomplete="current-password" required></label>'
+    +(loginErr?'<p class="err">'+esc(loginErr)+'</p>':'')
+    +'<div class="row-actions"><button class="btn primary" type="submit">Entrar</button></div></form>';
+}
 function matchCountNote(){var n=S.teams.length;if(draftFormat==='liga')return n+' equipos → '+(n*(n-1)/2)+' partidos.';var size=1;while(size<n)size*=2;var byes=size-n;return n+' equipos → '+(n-1+(n>=3?1:0))+' partidos'+(byes?', '+byes+' '+(byes===1?'equipo pasa':'equipos pasan')+' directo a la segunda ronda por sorteo':'')+'.'}
 
 function render(){
   var app=document.getElementById('app');
   var focusId=document.activeElement&&document.activeElement.id;
-  var vals={};['f-name','f-p1','f-p2','f-club'].forEach(function(k){var e=document.getElementById(k);if(e)vals[k]=e.value});
+  var vals={};['f-name','f-p1','f-p2','f-club','f-pass'].forEach(function(k){var e=document.getElementById(k);if(e)vals[k]=e.value});
   if(tab==='admin'&&!isAdmin())tab='vivo';
+  if(tab==='login'&&canEdit)tab='admin';
   var p=podium(),liveN=S.matches.filter(function(m){return m.status==='vivo'}).length;
   var status=S.phase==='registro'?'<span class="pill">Inscripciones abiertas</span>':p?'<span class="pill gold">Torneo terminado</span>':liveN?'<span class="pill live"><span class="dot"></span>'+liveN+' en vivo</span>':'<span class="pill">En juego</span>';
   var upd=S.updated?new Date(S.updated).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}):'';
   var tabs=[['vivo','En vivo'],['partidos','Partidos'],['tabla',S.phase!=='registro'&&S.format==='liga'?'Tabla':S.phase==='registro'?'Tabla':'Llaves'],['equipos','Equipos']];
   if(isAdmin())tabs.push(['admin','Admin']);
-  var body=tab==='partidos'?viewPartidos():tab==='tabla'?viewTabla():tab==='equipos'?viewEquipos():tab==='admin'?viewAdmin():viewVivo();
+  var body=!loaded?'<div class="empty"><b>Cargando el torneo…</b></div>':tab==='login'?viewLogin():tab==='partidos'?viewPartidos():tab==='tabla'?viewTabla():tab==='equipos'?viewEquipos():tab==='admin'?viewAdmin():viewVivo();
   app.innerHTML='<header class="hdr"><div class="eyebrow">Torneo FIFA 2 vs 2 · Cumpleaños de Pabs</div><h1 class="brand">Copa <span>Pabs</span></h1>'
     +'<div class="eyebrow">'+status+(upd?'<span>Actualizado '+esc(upd)+'</span>':'')
-    +(canEdit&&!readOnly?'<button class="pill" data-act="admin-mode" style="background:none;cursor:pointer">'+(adminMode?'Ver como invitado':'Volver a modo admin')+'</button>':'')+'</div>'
-    +(LOCAL?'<p class="note">Modo local: los cambios se guardan solo en este navegador. Para que todos vean los resultados en vivo en su celular, usen el enlace de la página en Claude.</p>':'')+'</header>'
+    +(dirty||saving?'<span>Guardando…</span>':'')
+    +(canEdit?'<button class="pill linkish" data-act="admin-mode">'+(adminMode?'Ver como invitado':'Volver a modo admin')+'</button><button class="pill linkish" data-act="logout">Salir de admin</button>'
+      :'<button class="pill linkish" data-act="tab" data-tab="login">Admin</button>')+'</div>'
+    +(dbError?'<p class="err">'+esc(dbError)+'</p>':'')+'</header>'
     +'<nav class="tabs" role="tablist">'+tabs.map(function(t){return '<button class="tab" role="tab" data-act="tab" data-tab="'+t[0]+'" aria-selected="'+(tab===t[0])+'">'+t[1]+(t[0]==='vivo'&&liveN?' <span class="n">●</span>':'')+'</button>'}).join('')+'</nav>'
-    +'<main>'+body+'</main>'
-    +(publishing||saveTimer?'':'');
+    +'<main>'+body+'</main>';
   Object.keys(vals).forEach(function(k){var e=document.getElementById(k);if(e)e.value=vals[k]});
   if(focusId){var f=document.getElementById(focusId);if(f)f.focus()}
-  var ov=document.getElementById('saving');
-  if(publishing){if(!ov){ov=document.createElement('div');ov.id='saving';ov.className='saving';ov.textContent='Guardando…';document.body.appendChild(ov)}}
-  else if(ov)ov.remove();
 }
 
 /* ---------- Events ---------- */
@@ -464,14 +483,19 @@ function M(id){for(var i=0;i<S.matches.length;i++)if(S.matches[i].id===id)return
 document.addEventListener('click',function(e){
   var b=e.target.closest('[data-act]');if(!b||b.disabled)return;
   var act=b.getAttribute('data-act'),id=b.getAttribute('data-id'),m=id&&M(id);
-  if(act!=='del-team'&&act!=='start-t'&&act.indexOf('reset')!==0)confirmKey=null;
+  if(act!=='del-team'&&act!=='start-t'&&act.indexOf('reset')!==0&&act.indexOf('-local')<0)confirmKey=null;
   if(act==='tab'){tab=b.getAttribute('data-tab');store('set','copa-tab',tab);render();window.scrollTo(0,0);return}
   if(act==='admin-mode'){adminMode=!adminMode;render();return}
-  if(!isAdmin()||publishing)return;
+  if(act==='logout'){canEdit=false;pass='';lset(PKEY,null);tab='vivo';render();return}
+  if(!isAdmin())return;
   if(act==='fmt'){draftFormat=b.getAttribute('data-f');render();return}
   if(act==='del-team'){if(confirmKey!=='del-'+id){confirmKey='del-'+id;render();return}confirmKey=null;S.teams=S.teams.filter(function(t){return t.id!==id});save();return}
   if(act==='start-t'){if(confirmKey!=='start-t'){confirmKey='start-t';render();return}confirmKey=null;
     var ids=S.teams.map(function(t){return t.id});S.format=draftFormat;S.matches=draftFormat==='liga'?buildLiga(ids):buildKO(ids);S.phase='torneo';tab='vivo';save(300);return}
+  if(act==='upload-local'||act==='forget-local'){if(confirmKey!==act){confirmKey=act;render();return}confirmKey=null;
+    var lc=localCopy();lset('copa-pabs-state',null);
+    if(act==='upload-local'&&lc){S=lc;if(S.format)draftFormat=S.format;tab='vivo';save(0);toast('Listo: todos ven ahora tu torneo.')}else render();
+    return}
   if(act==='reset-keep'||act==='reset-all'){if(confirmKey!==act){confirmKey=act;render();return}confirmKey=null;
     S.phase='registro';S.matches=[];if(act==='reset-all')S.teams=[];tab=act==='reset-all'?'admin':'admin';save(300);return}
   if(!m)return;
@@ -483,7 +507,14 @@ document.addEventListener('click',function(e){
   else if(act==='reopen'){if(!canReopen(m))return;m.status='vivo';save()}
 });
 document.addEventListener('submit',function(e){
-  if(e.target.id!=='team-form')return;e.preventDefault();if(!isAdmin()||publishing)return;
+  if(e.target.id==='login-form'){e.preventDefault();
+    var pw=document.getElementById('f-pass').value;loginErr='';
+    api('POST',{password:pw,check:true}).then(function(r){
+      if(r.ok){pass=pw;lset(PKEY,pw);canEdit=true;adminMode=true;tab='admin';render();return}
+      loginErr=r.status===401?'Contraseña incorrecta.':(r.j.error||'No se pudo verificar la contraseña.');render();
+    }).catch(function(){loginErr='Sin conexión. Intenta de nuevo.';render()});
+    return}
+  if(e.target.id!=='team-form')return;e.preventDefault();if(!isAdmin())return;
   function v(k){return document.getElementById(k).value.trim()}
   var name=v('f-name'),p1=v('f-p1'),p2=v('f-p2'),club=v('f-club');
   if(!name||!p1||!p2||!club){formErr='Llena los cuatro campos.';render();return}
@@ -491,17 +522,15 @@ document.addEventListener('submit',function(e){
   if(S.teams.some(function(t){return t.club.toLowerCase()===club.toLowerCase()})){formErr=club+' ya lo eligió otro equipo. Escojan otro club.';render();return}
   formErr='';S.teams.push({id:uid(),name:name,p1:p1,p2:p2,club:club});
   ['f-name','f-p1','f-p2','f-club'].forEach(function(k){document.getElementById(k).value=''});
-  save(2500);document.getElementById('f-name')&&document.getElementById('f-name').focus();
+  save();document.getElementById('f-name')&&document.getElementById('f-name').focus();
 });
 
-if(LOCAL)canEdit=true;
 render();
-if(!LOCAL){
-  window.claude.use('artifact').then(function(a){art=a;if(!a)return;
-    return window.claude.use('user').then(function(u){return u?u.canEdit():false}).then(function(ok){canEdit=!!ok;render()});
-  }).catch(function(){});
-}
+if(pass){api('POST',{password:pass,check:true}).then(function(r){if(r.ok)canEdit=true;else if(r.status===401){pass='';lset(PKEY,null)}render()}).catch(function(){})}
+pull();
+setInterval(pull,3000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)pull()});
 })();
 </script>
-
-</body></html>
+</body>
+</html>
