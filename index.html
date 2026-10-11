@@ -201,7 +201,11 @@ function buildKO(ids){
   var n=ids.length,size=1;while(size<n)size*=2;
   var m=size/2,byes=size-n,R=Math.log2(size),out=[];
   var t=shuffle(ids);
-  for(var i=0;i<m;i++){out.push({id:uid(),stage:'ko',round:1,idx:i,a:t[i],b:i<byes?null:t[m+(i-byes)],ga:0,gb:0,pen:null,status:'pendiente'})}
+  /* spread byes across the bracket (bit-reversed slots) so bye teams land in different halves */
+  var bits=Math.log2(m),slots=[];for(var q=0;q<m;q++){var rv=0;for(var bb=0;bb<bits;bb++)if(q&(1<<bb))rv|=1<<(bits-1-bb);slots.push(rv)}
+  var byeSet={};slots.slice(0,byes).forEach(function(x){byeSet[x]=1});
+  var k=0;
+  for(var i=0;i<m;i++){var ta=t[k++],tb=byeSet[i]?null:t[k++];out.push({id:uid(),stage:'ko',round:1,idx:i,a:ta,b:tb,ga:0,gb:0,pen:null,status:'pendiente'})}
   for(var r=2;r<=R;r++){var c=size/Math.pow(2,r);for(var k=0;k<c;k++)out.push({id:uid(),stage:'ko',round:r,idx:k,ga:0,gb:0,pen:null,status:'pendiente'})}
   if(R>=2)out.push({id:uid(),stage:'tercer',round:R,idx:0,ga:0,gb:0,pen:null,status:'pendiente'});
   return out;
@@ -218,10 +222,14 @@ function buildLiga(ids){
 function koRounds(){var R=0;S.matches.forEach(function(m){if(m.stage==='ko'&&m.round>R)R=m.round});return R}
 function getKO(r,i){for(var k=0;k<S.matches.length;k++){var m=S.matches[k];if(m.stage==='ko'&&m.round===r&&m.idx===i)return m}return null}
 /* participants: string id = team, null = nobody (bye), undefined = still to be decided */
+/* A match with `via` sends its winner to a play-in final first; the play-in final's winner moves on instead */
+function feedWinner(f){if(!f)return undefined;return f.via?winner(M(f.via)):winner(f)}
 function sides(m){
   if(m.stage==='liga')return[m.a,m.b];
   if(m.stage==='ko'&&m.round===1)return[m.a,m.b];
-  if(m.stage==='ko')return[winner(getKO(m.round-1,m.idx*2)),winner(getKO(m.round-1,m.idx*2+1))];
+  if(m.stage==='prev')return[m.a,m.b];
+  if(m.stage==='extra')return m.feedA?[winner(M(m.feedA)),winner(M(m.feedB))]:[m.a,m.b];
+  if(m.stage==='ko')return[feedWinner(getKO(m.round-1,m.idx*2)),feedWinner(getKO(m.round-1,m.idx*2+1))];
   var R=koRounds();return[loser(getKO(R-1,0)),loser(getKO(R-1,1))];
 }
 function result(m){
@@ -240,12 +248,14 @@ function winner(m){if(!m)return undefined;var r=result(m);return r===undefined?u
 function loser(m){if(!m)return undefined;var r=result(m);return r===undefined?undefined:r.l}
 function playable(m){var s=sides(m);return typeof s[0]==='string'&&typeof s[1]==='string'}
 function stageName(m){
+  if(m.stage==='extra')return m.label;
+  if(m.stage==='prev')return 'Primera ronda';
   if(m.stage==='liga')return 'Jornada '+m.round;
   if(m.stage==='tercer')return 'Tercer lugar';
   var c=Math.pow(2,koRounds()-m.round);
   return c===1?'Final':c===2?'Semifinal':c===4?'Cuartos de final':c===8?'Octavos de final':'Ronda '+m.round;
 }
-function order(m){return m.stage==='liga'?m.round*100+m.idx:m.stage==='tercer'?(m.round-0.5)*100:m.round*100+m.idx}
+function order(m){return m.stage==='extra'||m.stage==='prev'?m.ord:m.stage==='liga'?m.round*100+m.idx:m.stage==='tercer'?(m.round-0.5)*100:m.round*100+m.idx}
 function sortedMatches(){return S.matches.slice().sort(function(x,y){return order(x)-order(y)})}
 function standings(){
   var tb={};S.teams.forEach(function(t){tb[t.id]={id:t.id,pj:0,g:0,e:0,p:0,gf:0,gc:0,pts:0}});
@@ -260,14 +270,19 @@ function podium(){
     if(S.matches.some(function(m){return m.status!=='final'}))return null;
     var st=standings();return[st[0]&&st[0].id,st[1]&&st[1].id,st[2]&&st[2].id];
   }
-  var R=koRounds(),f=getKO(R,0),fr=result(f);if(fr===undefined)return null;
+  var R=koRounds(),f=getKO(R,0);if(!f)return null;var fr=result(f);if(fr===undefined)return null;
   var third=null;
   var tm=S.matches.filter(function(m){return m.stage==='tercer'})[0];
   if(tm){var tr=result(tm);if(tr===undefined)return null;third=tr.w}
   return[fr.w,fr.l,third];
 }
 function dependents(m){
+  if(m.stage==='prev')return S.matches.filter(function(x){return x.stage==='ko'||x.stage==='tercer'});
+  if(m.stage==='extra'){var out2=[];S.matches.forEach(function(x){
+    if(x.stage==='extra'&&(x.feedA===m.id||x.feedB===m.id))out2.push(x);
+    if(x.stage==='ko'&&x.via===m.id){var n2=getKO(x.round+1,Math.floor(x.idx/2));if(n2)out2.push(n2)}});return out2}
   if(m.stage!=='ko')return[];
+  if(m.via){var y=M(m.via);return y?[y]:[]}
   var R=koRounds(),out=[];var nx=getKO(m.round+1,Math.floor(m.idx/2));if(nx)out.push(nx);
   if(m.round===R-1)S.matches.forEach(function(x){if(x.stage==='tercer')out.push(x)});
   return out;
@@ -374,6 +389,7 @@ function viewVivo(){
   if(live.length)h+='<section class="sec"><h2>Jugándose ahora</h2>'+live.map(bigBoard).join('')+'</section>';
   var next=sortedMatches().filter(function(m){return m.status==='pendiente'&&playable(m)});
   if(next.length)h+='<section class="sec"><h2>'+(live.length?'Sigue':'Próximo partido')+'</h2>'+bigBoard(next[0])+'</section>';
+  else if(!live.length&&!p&&!koRounds()&&S.matches.some(function(m){return m.stage==='prev'}))h+='<div class="empty"><b>Terminó la primera ronda</b><span>En un momento se sortean las llaves de la segunda ronda.</span></div>';
   else if(!live.length&&!p)h+='<div class="empty"><b>Esperando cruces</b><span>Los siguientes partidos aparecen al terminar los actuales.</span></div>';
   var done=S.matches.filter(function(m){return m.status==='final'&&playable(m)}).sort(function(x,y){return (y.endedAt||0)-(x.endedAt||0)}).slice(0,4);
   if(done.length)h+='<section class="sec"><h2>Últimos resultados</h2><div class="rows">'+done.map(matchRow).join('')+'</div></section>';
@@ -401,8 +417,13 @@ function viewTabla(){
     cols+='<div class="bcol"><h3>'+esc(stageName(ms[0]))+'</h3>'+ms.map(bm).join('')+'</div>';
   }
   var third=S.matches.filter(function(m){return m.stage==='tercer'})[0];
-  return '<section class="sec"><h2>Llaves</h2><div class="bracket"><div class="bcols">'+cols+'</div></div></section>'
-    +(third?'<section class="sec"><h2>Partido por el tercer lugar</h2><div class="rows">'+matchRow(third)+'</div></section>':'');
+  var prev=sortedMatches().filter(function(m){return m.stage==='prev'});
+  var prevHTML=prev.length?'<section class="sec"><h2>Primera ronda</h2><div class="rows">'+prev.map(matchRow).join('')+'</div></section>':'';
+  if(!R)return prevHTML+'<div class="empty"><b>Segunda ronda por sortear</b><span>Las llaves se arman con los ganadores cuando termine la primera ronda.</span></div>';
+  return '<section class="sec"><h2>'+(prev.length?'Llaves · segunda ronda':'Llaves')+'</h2><div class="bracket"><div class="bcols">'+cols+'</div></div></section>'
+    +(S.matches.some(function(m){return m.stage==='extra'})?'<section class="sec"><h2>Repechaje</h2><div class="rows">'+sortedMatches().filter(function(m){return m.stage==='extra'}).map(matchRow).join('')+'</div></section>':'')
+    +(third?'<section class="sec"><h2>Partido por el tercer lugar</h2><div class="rows">'+matchRow(third)+'</div></section>':'')
+    +prevHTML;
 }
 function bm(m){
   var s=sides(m),r=result(m);
@@ -452,6 +473,23 @@ function addLateTeam(t){
   m.status='pendiente';m.ga=0;m.gb=0;m.pen=null;
   return true;
 }
+function playinTargets(){
+  if(S.format==='liga')return[];
+  var R=koRounds();
+  return S.matches.filter(function(m){
+    if(m.stage!=='ko'||m.via||m.round>R-2||m.status!=='pendiente')return false;
+    var s=sides(m);if(s[0]===null||s[1]===null)return false;
+    var nx=getKO(m.round+1,Math.floor(m.idx/2));return nx&&nx.status==='pendiente';
+  }).sort(function(x,y){return order(y)-order(x)});
+}
+function targetLabel(m){var s=sides(m);function n(id){return id?(T(id)||{}).name:'Por definir'}return stageName(m)+': '+n(s[0])+' vs '+n(s[1])}
+function teamFieldsP(p,title){
+  return '<fieldset style="border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:10px;margin:0;min-width:0"><legend style="padding:0 6px;font-weight:700">'+title+'</legend>'
+    +'<label>Nombre del equipo<input id="'+p+'-name" maxlength="40" required></label>'
+    +'<div class="grid2"><label>Jugador 1<input id="'+p+'-p1" maxlength="30" required></label><label>Jugador 2<input id="'+p+'-p2" maxlength="30" required></label></div>'
+    +'<label>Equipo del FIFA<input id="'+p+'-club" list="clubs-p" maxlength="40" required></label></fieldset>';
+}
+var playinErr='';
 function localCopy(){try{var p=JSON.parse(lget('copa-pabs-state')||'null');return p&&p.teams&&p.matches&&p.teams.length?p:null}catch(e){return null}}
 function viewAdmin(){
   var h='',lc=localCopy();
@@ -474,17 +512,36 @@ function viewAdmin(){
       +'<div class="row-actions"><button class="btn primary" data-act="start-t"'+(S.teams.length<3?' disabled':'')+'>'+(confirmKey==='start-t'?'Confirmar: sortear y arrancar':'Sortear y arrancar torneo')+'</button></div></section>';
   }else{
     var fb=freeByes(),canAdd=S.format==='liga'||fb.length>0;
-    h+='<form class="panel" id="team-form" autocomplete="off"><h3>Agregar equipo al torneo</h3>';
     if(canAdd){
+      h+='<form class="panel" id="team-form" autocomplete="off"><h3>Agregar equipo al torneo</h3>';
       h+='<p class="note">'+(S.format==='liga'
         ?'El equipo nuevo juega contra todos los demás. Sus partidos se agregan al final del calendario y los resultados de hoy no cambian.'
         :'Quedan '+fb.length+' '+(fb.length===1?'lugar':'lugares')+' de pase directo. El equipo nuevo juega la primera ronda contra '+esc((T(fb[0].a||fb[0].b)||{}).name||'el equipo con pase directo')+', que ya no pasa directo. Lo demás no cambia.')+'</p>'
         +teamFields()+(formErr?'<p class="err">'+esc(formErr)+'</p>':'')
         +'<div class="row-actions"><button class="btn primary" type="submit">Agregar al torneo</button></div>';
     }else{
-      h+='<p class="note">Ya no hay lugares libres en las llaves: todos los pases directos ya se usaron o esos equipos ya jugaron su siguiente partido. Para meter más equipos habría que volver a sortear.</p>';
+      h+='</form>';
     }
-    h+='</form>';
+    var hasPrev=S.matches.some(function(m){return m.stage==='prev'}),anyLive=S.matches.some(function(m){return m.status==='vivo'});
+    if(S.format!=='liga'&&!canAdd&&!hasPrev){
+      h+='<form class="panel" id="reorg-form" autocomplete="off"><h3>Agregar 2 equipos y rehacer las llaves</h3>'
+        +'<p class="note">Los partidos ya jugados cuentan como primera ronda (cada equipo juega uno). Los 2 equipos nuevos juegan su partido de primera ronda entre ellos. Los cruces que todavía no se juegan se quitan. Cuando termine la primera ronda, sorteas la segunda ronda con los ganadores.</p>'
+        +teamFieldsP('n1','Equipo nuevo 1')+teamFieldsP('n2','Equipo nuevo 2')
+        +'<datalist id="clubs-p">'+CLUBS.map(function(c){return '<option value="'+esc(c)+'">'}).join('')+'</datalist>'
+        +(anyLive?'<p class="err">Hay un partido en vivo. Termínalo o cancélalo antes de rehacer las llaves.</p>':'')
+        +(playinErr?'<p class="err">'+esc(playinErr)+'</p>':'')
+        +'<div class="row-actions"><button class="btn primary" type="submit"'+(anyLive?' disabled':'')+'>'+(confirmKey==='reorg'?'Confirmar: agregar y rehacer llaves':'Agregar equipos y rehacer llaves')+'</button></div></form>';
+    }
+    if(hasPrev&&!koRounds()){
+      var prevM=S.matches.filter(function(m){return m.stage==='prev'});
+      var pend=prevM.filter(function(m){return m.status!=='final'}).length;
+      var surv=pend?[]:prevM.map(function(m){return winner(m)}).filter(Boolean);
+      h+='<section class="panel"><h3>Sortear segunda ronda</h3>'
+        +(pend?'<p class="note">Faltan '+pend+' '+(pend===1?'partido':'partidos')+' de primera ronda. Cuando terminen, aquí sorteas las llaves con los ganadores.</p>'
+          :'<p class="note">Pasan '+surv.length+' equipos: '+surv.map(function(id){return esc((T(id)||{}).name)}).join(', ')+'. Se sortean llaves de eliminación directa con partido por el 3er lugar'+(function(){var z=1;while(z<surv.length)z*=2;var by=z-surv.length;return by?'; '+by+' '+(by===1?'equipo pasa':'equipos pasan')+' directo por sorteo':''})()+'.</p>'
+            +'<div class="row-actions"><button class="btn primary" data-act="draw-r2"'+(surv.length<3?' disabled':'')+'>'+(confirmKey==='draw-r2'?'Confirmar: sortear segunda ronda':'Sortear segunda ronda')+'</button></div>')
+        +'</section>';
+    }
     h+='<section class="sec"><h2>Equipos ('+S.teams.length+')</h2><p class="note">Puedes corregir nombres, jugadores o club. Los resultados no cambian.</p>'+teamsGrid(false,true)+'</section>';
     h+='<section class="panel"><h3>Cómo capturar resultados</h3><p class="note">En las pestañas En vivo o Partidos, toca “Empezar partido”, suma los goles con + y − mientras juegan y toca “Terminar partido”. Cada cambio se guarda solo y llega a todos los celulares en unos segundos.</p></section>';
     h+='<section class="panel"><h3>Reiniciar</h3><p class="note">Volver a inscripciones borra todos los resultados y el sorteo; solo conserva los equipos. Para sumar equipos sin perder nada, usa “Agregar equipo al torneo”.</p><div class="row-actions">'
@@ -504,7 +561,7 @@ function matchCountNote(){var n=S.teams.length;if(draftFormat==='liga')return n+
 function render(){
   var app=document.getElementById('app');
   var focusId=document.activeElement&&document.activeElement.id;
-  var vals={};['f-name','f-p1','f-p2','f-club','f-pass','e-name','e-p1','e-p2','e-club'].forEach(function(k){var e=document.getElementById(k);if(e)vals[k]=e.value});
+  var vals={};app.querySelectorAll('input[id],select[id]').forEach(function(e){if(e.type!=='password'||e.id==='f-pass')vals[e.id]=e.value});
   if(tab==='admin'&&!isAdmin())tab='vivo';
   if(tab==='login'&&canEdit)tab='admin';
   var p=podium(),liveN=S.matches.filter(function(m){return m.status==='vivo'}).length;
@@ -530,11 +587,16 @@ function M(id){for(var i=0;i<S.matches.length;i++)if(S.matches[i].id===id)return
 document.addEventListener('click',function(e){
   var b=e.target.closest('[data-act]');if(!b||b.disabled)return;
   var act=b.getAttribute('data-act'),id=b.getAttribute('data-id'),m=id&&M(id);
-  if(act!=='del-team'&&act!=='start-t'&&act.indexOf('reset')!==0&&act.indexOf('-local')<0)confirmKey=null;
+  if(act!=='del-team'&&act!=='start-t'&&act!=='draw-r2'&&act.indexOf('reset')!==0&&act.indexOf('-local')<0)confirmKey=null;
   if(act==='tab'){tab=b.getAttribute('data-tab');store('set','copa-tab',tab);render();window.scrollTo(0,0);return}
   if(act==='admin-mode'){adminMode=!adminMode;render();return}
   if(act==='logout'){canEdit=false;pass='';lset(PKEY,null);tab='vivo';render();return}
   if(!isAdmin())return;
+  if(act==='draw-r2'){if(confirmKey!=='draw-r2'){confirmKey='draw-r2';render();return}confirmKey=null;
+    var pm=S.matches.filter(function(m){return m.stage==='prev'});
+    if(pm.some(function(m){return m.status!=='final'})||koRounds())return;
+    var sv=pm.map(function(m){return winner(m)}).filter(Boolean);
+    S.matches=pm.concat(buildKO(sv));tab='tabla';save();toast('Segunda ronda sorteada.');return}
   if(act==='edit-team'){editId=id;editErr='';render();var en=document.getElementById('e-name');if(en)en.focus();return}
   if(act==='edit-cancel'){editId=null;editErr='';render();return}
   if(act==='fmt'){draftFormat=b.getAttribute('data-f');render();return}
@@ -556,6 +618,42 @@ document.addEventListener('click',function(e){
   else if(act==='reopen'){if(!canReopen(m))return;m.status='vivo';save()}
 });
 document.addEventListener('submit',function(e){
+  if(e.target.id==='reorg-form'){e.preventDefault();if(!isAdmin())return;
+    function rv(k){var el=document.getElementById(k);return el?el.value.trim():''}
+    var nt2=[1,2].map(function(i){return{id:uid(),name:rv('n'+i+'-name'),p1:rv('n'+i+'-p1'),p2:rv('n'+i+'-p2'),club:rv('n'+i+'-club')}});
+    if(nt2.some(function(t){return!t.name||!t.p1||!t.p2||!t.club})){playinErr='Llena todos los campos de los 2 equipos.';render();return}
+    var all2=S.teams.concat(nt2);
+    function dup2(k){var seen={};return all2.some(function(t){var v=t[k].toLowerCase();if(seen[v])return true;seen[v]=1;return false})}
+    if(dup2('name')){playinErr='Hay dos equipos con el mismo nombre. Usa otro.';render();return}
+    if(dup2('club')){playinErr='Ese club ya lo tiene otro equipo. Escojan otro.';render();return}
+    if(S.matches.some(function(m){return m.status==='vivo'})){playinErr='Hay un partido en vivo. Termínalo primero.';render();return}
+    if(confirmKey!=='reorg'){confirmKey='reorg';playinErr='';render();return}
+    confirmKey=null;playinErr='';
+    var played=sortedMatches().filter(function(m){return m.status==='final'&&playable(m)});
+    var kept=played.map(function(m,i){var sd=sides(m);return{id:m.id,stage:'prev',ord:10+i,a:sd[0],b:sd[1],ga:m.ga,gb:m.gb,pen:m.pen,status:'final',endedAt:m.endedAt}});
+    S.teams.push(nt2[0],nt2[1]);
+    kept.push({id:uid(),stage:'prev',ord:10+kept.length,a:nt2[0].id,b:nt2[1].id,ga:0,gb:0,pen:null,status:'pendiente'});
+    S.matches=kept;
+    ['n1','n2'].forEach(function(p){['name','p1','p2','club'].forEach(function(k){var el=document.getElementById(p+'-'+k);if(el)el.value=''})});
+    tab='vivo';save();toast('Listo: primera ronda armada.');return}
+  if(e.target.id==='playin-form'){e.preventDefault();if(!isAdmin())return;
+    function pv(k){var el=document.getElementById(k);return el?el.value.trim():''}
+    var nt=[1,2].map(function(i){return{id:uid(),name:pv('n'+i+'-name'),p1:pv('n'+i+'-p1'),p2:pv('n'+i+'-p2'),club:pv('n'+i+'-club')}});
+    var tgt=M(pv('n-target'));
+    if(nt.some(function(t){return!t.name||!t.p1||!t.p2||!t.club})){playinErr='Llena todos los campos de los 2 equipos.';render();return}
+    var all=S.teams.concat(nt);
+    function dup(k){var seen={};return all.some(function(t){var v=t[k].toLowerCase();if(seen[v])return true;seen[v]=1;return false})}
+    if(dup('name')){playinErr='Hay dos equipos con el mismo nombre. Usa otro.';render();return}
+    if(dup('club')){playinErr='Ese club ya lo tiene otro equipo. Escojan otro.';render();return}
+    if(!tgt||playinTargets().indexOf(tgt)<0){playinErr='Ese cruce ya no está disponible. Elige otro.';render();return}
+    if(confirmKey!=='playin'){confirmKey='playin';playinErr='';render();return}
+    confirmKey=null;playinErr='';
+    S.teams.push(nt[0],nt[1]);
+    var X={id:uid(),stage:'extra',label:'Repechaje',ord:tgt.round*100-50,a:nt[0].id,b:nt[1].id,ga:0,gb:0,pen:null,status:'pendiente'};
+    var Y={id:uid(),stage:'extra',label:'Repechaje final',ord:tgt.round*100+90,feedA:tgt.id,feedB:X.id,ga:0,gb:0,pen:null,status:'pendiente'};
+    tgt.via=Y.id;S.matches.push(X,Y);
+    ['n1','n2'].forEach(function(p){['name','p1','p2','club'].forEach(function(k){var el=document.getElementById(p+'-'+k);if(el)el.value=''})});
+    tab='partidos';save();toast('Repechaje creado.');return}
   if(e.target.id==='edit-form'){e.preventDefault();if(!isAdmin())return;
     var t=T(e.target.getAttribute('data-id'));if(!t){editId=null;render();return}
     function ev(k){return document.getElementById(k).value.trim()}
