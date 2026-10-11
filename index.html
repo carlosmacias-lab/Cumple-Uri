@@ -342,7 +342,8 @@ function adminControls(m){
   if(m.status==='pendiente')return '<div class="ctl"><button class="btn primary" data-act="start" data-id="'+m.id+'">Empezar partido</button></div>';
   if(m.status==='final'){
     var ok=canReopen(m);
-    return '<div class="ctl"><button class="btn ghost" data-act="reopen" data-id="'+m.id+'"'+(ok?'':' disabled')+'>Corregir resultado</button>'+(ok?'':'<p class="note">Ya se jugó el siguiente partido de este cruce.</p>')+'</div>';
+    var del=m.stage==='prev'&&!koRounds()?'<button class="btn danger" data-act="del-prev" data-id="'+m.id+'">'+(confirmKey==='delp-'+m.id?'¿Seguro? Toca de nuevo':'Quitar partido')+'</button>':'';
+    return '<div class="ctl"><button class="btn ghost" data-act="reopen" data-id="'+m.id+'"'+(ok?'':' disabled')+'>Corregir resultado</button>'+del+(ok?'':'<p class="note">Ya se jugó el siguiente partido de este cruce.</p>')+'</div>';
   }
   var tie=m.ga===m.gb&&m.stage!=='liga';
   var h='<div class="ctl"><div class="adm-score">'
@@ -473,6 +474,12 @@ function addLateTeam(t){
   m.status='pendiente';m.ga=0;m.gb=0;m.pen=null;
   return true;
 }
+/* First-round survivors: teams that won a first-round match and lost none */
+function survivors(){
+  var won=[],lost={};
+  S.matches.forEach(function(m){if(m.stage!=='prev')return;var r=result(m);if(!r)return;if(r.l)lost[r.l]=1;if(r.w&&won.indexOf(r.w)<0)won.push(r.w)});
+  return won.filter(function(id){return!lost[id]});
+}
 function playinTargets(){
   if(S.format==='liga')return[];
   var R=koRounds();
@@ -535,7 +542,7 @@ function viewAdmin(){
     if(hasPrev&&!koRounds()){
       var prevM=S.matches.filter(function(m){return m.stage==='prev'});
       var pend=prevM.filter(function(m){return m.status!=='final'}).length;
-      var surv=pend?[]:prevM.map(function(m){return winner(m)}).filter(Boolean);
+      var surv=pend?[]:survivors();
       h+='<section class="panel"><h3>Sortear segunda ronda</h3>'
         +(pend?'<p class="note">Faltan '+pend+' '+(pend===1?'partido':'partidos')+' de primera ronda. Cuando terminen, aquí sorteas las llaves con los ganadores.</p>'
           :'<p class="note">Pasan '+surv.length+' equipos: '+surv.map(function(id){return esc((T(id)||{}).name)}).join(', ')+'. Se sortean llaves de eliminación directa con partido por el 3er lugar'+(function(){var z=1;while(z<surv.length)z*=2;var by=z-surv.length;return by?'; '+by+' '+(by===1?'equipo pasa':'equipos pasan')+' directo por sorteo':''})()+'.</p>'
@@ -587,15 +594,18 @@ function M(id){for(var i=0;i<S.matches.length;i++)if(S.matches[i].id===id)return
 document.addEventListener('click',function(e){
   var b=e.target.closest('[data-act]');if(!b||b.disabled)return;
   var act=b.getAttribute('data-act'),id=b.getAttribute('data-id'),m=id&&M(id);
-  if(act!=='del-team'&&act!=='start-t'&&act!=='draw-r2'&&act.indexOf('reset')!==0&&act.indexOf('-local')<0)confirmKey=null;
+  if(act!=='del-team'&&act!=='start-t'&&act!=='draw-r2'&&act!=='del-prev'&&act.indexOf('reset')!==0&&act.indexOf('-local')<0)confirmKey=null;
   if(act==='tab'){tab=b.getAttribute('data-tab');store('set','copa-tab',tab);render();window.scrollTo(0,0);return}
   if(act==='admin-mode'){adminMode=!adminMode;render();return}
   if(act==='logout'){canEdit=false;pass='';lset(PKEY,null);tab='vivo';render();return}
   if(!isAdmin())return;
+  if(act==='del-prev'){if(confirmKey!=='delp-'+id){confirmKey='delp-'+id;render();return}confirmKey=null;
+    if(!m||m.stage!=='prev'||koRounds())return;
+    S.matches=S.matches.filter(function(x){return x.id!==id});save();toast('Partido quitado.');return}
   if(act==='draw-r2'){if(confirmKey!=='draw-r2'){confirmKey='draw-r2';render();return}confirmKey=null;
     var pm=S.matches.filter(function(m){return m.stage==='prev'});
     if(pm.some(function(m){return m.status!=='final'})||koRounds())return;
-    var sv=pm.map(function(m){return winner(m)}).filter(Boolean);
+    var sv=survivors();
     S.matches=pm.concat(buildKO(sv));tab='tabla';save();toast('Segunda ronda sorteada.');return}
   if(act==='edit-team'){editId=id;editErr='';render();var en=document.getElementById('e-name');if(en)en.focus();return}
   if(act==='edit-cancel'){editId=null;editErr='';render();return}
